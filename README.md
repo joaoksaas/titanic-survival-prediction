@@ -1,10 +1,33 @@
 # 🚢 Titanic: Previsão de Sobrevivência
 
 Projeto de Machine Learning para prever quais passageiros do Titanic
-sobreviveram, usando Python e scikit-learn. É meu primeiro projeto
-prático de ML, feito para aprender o fluxo completo partindo do zero,
+sobreviveram, usando Python e scikit-learn. Feito para aprender o fluxo completo partindo do zero,
 com foco em **entender cada etapa** e avaliar os modelos com rigor, e
 não apenas em maximizar a acurácia.
+
+## Resumo
+
+- **Objetivo:** prever `Survived` (0 = morreu, 1 = sobreviveu) a partir do perfil do passageiro.
+- **Método:** baselines simples, validação cruzada (inclusive repetida e aninhada), comparações pareadas fold a fold, Pipeline do scikit-learn e interpretação dos modelos.
+- **Resultado principal:** os modelos chegam a ~83% em validação cruzada, apenas ~4 a 5 pontos acima da regra "mulher sobrevive, homem morre". No teste do Kaggle, ficaram muito próximos dessa regra.
+
+| Etapa | Acurácia |
+|---|---|
+| Regra "mulher sobrevive" (split único) | 78,21% |
+| Regressão Logística, 4 variáveis (validação cruzada repetida) | 78,8% |
+| + família (one-hot) | 81,2% |
+| + título e família | 82,3% |
+| Pipeline (sem vazamento de dados) | 82,7% |
+| Random Forest ajustada (validação aninhada) | 83,4% |
+| + `Embarked`, `Deck`, `TicketGroup` | sem ganho |
+
+> Os protocolos de validação variam um pouco entre as linhas; vale a ordem de grandeza, e não o decimal.
+
+| Submissão no Kaggle | Nota |
+|---|---|
+| Regressão Logística (Pipeline, `Title` + `FamilyGroup`) | 0,77033 |
+| Random Forest ajustada (`min_samples_leaf=5`) | 0,75358 |
+| Referência: regra "só mulheres sobrevivem" (nota pública) | 0,76555 |
 
 ## Objetivo
 
@@ -15,7 +38,7 @@ verificar se os modelos realmente superam regras simples.
 ## Dataset
 
 Dados do [Titanic no Kaggle](https://www.kaggle.com/c/titanic):
-891 passageiros, com variáveis demográficas e da viagem.
+891 passageiros no treino e 418 no teste.
 Alvo: `Survived` (0 = morreu, 1 = sobreviveu).
 
 ## Abordagem
@@ -23,12 +46,13 @@ Alvo: `Survived` (0 = morreu, 1 = sobreviveu).
 - **Variáveis base:** `Pclass`, `Sex`, `Age`, `Fare`
 - **Variáveis de família:** `SibSp`, `Parch`, `FamilySize`, `IsAlone` e `FamilyGroup` (faixas: sozinho, 2 a 4 pessoas, 5 ou mais), esta última também em *one-hot encoding*
 - **Título:** extraído de `Name` (Mr, Miss, Mrs, Master e Rare, que agrupa os títulos pouco frequentes), em *one-hot encoding*
-- **Tratamento:** idade faltante preenchida com a mediana; `Sex` codificado em 0/1
-- **Avaliação:** split 80/20, validação cruzada estratificada (5 folds), validação cruzada repetida (5 folds × 5 a 10 repetições) e 100 splits aleatórios para medir a instabilidade; comparações entre variantes feitas fold a fold (pareadas)
+- **Testadas sem ganho:** `Embarked`, `Deck` (primeira letra de `Cabin`) e `TicketGroup` (quantos passageiros dividem o bilhete)
+- **Tratamento:** Pipeline do scikit-learn com imputação da mediana, padronização das numéricas e one-hot das categóricas, tudo aprendido só com o treino em cada rodada
+- **Avaliação:** split 80/20, validação cruzada estratificada, validação cruzada repetida, 100 splits aleatórios para medir a instabilidade, validação aninhada para o ajuste de hiperparâmetros; comparações entre variantes feitas fold a fold (pareadas)
 - **Modelos:** Regressão Logística, Árvore de Decisão e Random Forest
 - **Referências de comparação (baselines):** "sempre prever morreu" e a regra "mulher sobrevive, homem morre"
 
-## Resultados
+## Resultados detalhados
 
 ### 1. Baselines e primeiro modelo (split único, `random_state=42`)
 
@@ -166,25 +190,6 @@ não recupera a informação de idade onde ela falta.
 Title + Família contra Família sozinha: **+0,011** em média, com vitórias em 33 de 50 folds.
 Um ganho pequeno, acima do acaso, mas bem menos consistente que o da família sobre a base.
 
-**9.4 O que a Regressão Logística aprendeu (Title + Família, treinada em todos os dados).**
-
-| Coluna | Peso | Multiplicador das odds |
-|---|---|---|
-| Pclass | -0,96 | ×0,38 por classe pior |
-| Sex | 0,83 | ×2,3 |
-| Age | -0,03 | ×0,97 por ano |
-| Fare | 0,00 | ~×1 (efeito por libra minúsculo; escala diferente) |
-| Title_Miss | -0,32 | ×0,73 (vs. Master) |
-| Title_Mr | -2,30 | ×0,10 (vs. Master) |
-| Title_Mrs | 0,20 | ×1,22 (vs. Master) |
-| Title_Rare | -1,64 | ×0,19 (vs. Master) |
-| FamilyGroup_1 (2 a 4) | -0,10 | ×0,90 (vs. sozinho) |
-| FamilyGroup_2 (5 ou mais) | -2,28 | ×0,10 (vs. sozinho) |
-
-O que o modelo usa da família é sobretudo a penalidade das famílias grandes (~62
-passageiros); a vantagem de famílias de 2 a 4 sobre viajar sozinho praticamente
-desaparece depois de controlar sexo, classe e título.
-
 ### 10. Ajuste de `max_depth` com GridSearchCV (Árvore, com `SibSp`, `Parch` e `FamilySize`)
 
 | `max_depth` | Média | Desvio |
@@ -197,52 +202,123 @@ desaparece depois de controlar sexo, classe e título.
 | 8 | 0,822 | 0,016 |
 | Sem limite | 0,772 | 0,024 |
 
+### 11. Pipeline e interpretação da Regressão Logística
+
+**11.1 Acurácia com o Pipeline (validação repetida 5×10).**
+
+| Modelo | Antes (Title + Família) | Pipeline |
+|---|---|---|
+| Regressão Logística | 0,823 | 0,827 ± 0,024 |
+| Random Forest | 0,821 | 0,819 ± 0,022 |
+
+As diferenças (de 0,2 a 0,4 p.p.) estão dentro do ruído: corrigir o vazamento de dados custou, na prática, nada mensurável.
+
+**11.2 O que a Regressão Logística aprendeu** (variáveis numéricas padronizadas; categorias lidas por diferenças dentro de cada grupo).
+
+| Variável | Efeito |
+|---|---|
+| `Pclass` | -0,81 por desvio padrão (≈ -0,96 por classe; odds ×0,38) |
+| `Age` | -0,30 por desvio padrão (≈ -0,023 por ano) |
+| `Fare` | +0,21 por desvio padrão (≈ +0,004 por libra) |
+| Sexo | mulher contra homem: +1,81 (odds ×6,1) |
+| Título (contra Master) | Mrs -1,36 · Miss -1,88 · Rare -2,62 · Mr -2,98 |
+| Família (contra sozinho) | 2 a 4: -0,22 (odds ×0,80) · 5 ou mais: -2,61 (odds ×0,07) |
+
+O que o modelo usa da família é sobretudo a penalidade das famílias grandes (~62
+passageiros); a vantagem de famílias de 2 a 4 sobre viajar sozinho praticamente
+desaparece depois de controlar sexo, classe e título.
+
+### 12. Ajuste de hiperparâmetros com validação aninhada (15 rodadas externas, 5 folds internos)
+
+| Modelo | Padrão | Ajustado | Diferença | Ajustado vence / empata / perde |
+|---|---|---|---|---|
+| Regressão Logística (`C`) | 0,827 | 0,828 | +0,001 | 2 / 13 / 0 |
+| Random Forest (`max_depth`, `min_samples_leaf`) | 0,819 | 0,834 | +0,015 | 11 / 2 / 2 |
+
+A Random Forest escolheu `max_depth=None` e `min_samples_leaf=5`. A nota do `GridSearchCV`
+(0,850) é otimista, porque escolhe o melhor de 12 candidatos nos mesmos folds em que mede; a
+validação aninhada (0,834) é a estimativa honesta. A Regressão Logística já estava perto do
+ponto ótimo com os valores padrão.
+
+### 13. Novas variáveis: `Embarked`, `Deck` e `TicketGroup` (validação repetida 5×10, pareada)
+
+| Modelo | Variante | Média | Vence / empata / perde |
+|---|---|---|---|
+| Regressão Logística | Base | 0,827 | |
+| | + Embarked | 0,827 | 15 / 20 / 15 |
+| | + Deck | 0,827 | 20 / 11 / 19 |
+| | + TicketGroup | 0,828 | 7 / 42 / 1 |
+| | + as três | 0,827 | 23 / 6 / 21 |
+| Random Forest | Base | 0,836 | |
+| | + Embarked | 0,833 | 14 / 9 / 27 |
+| | + Deck | 0,833 | 15 / 10 / 25 |
+| | + TicketGroup | 0,833 | 10 / 16 / 24 |
+| | + as três | 0,830 | 13 / 3 / 34 |
+
+Nenhuma ajudou. O `Deck` é em boa parte outra forma de dizer "1ª classe" (86% dos passageiros
+com deck conhecido são da 1ª classe), e o `TicketGroup` concorda com o `FamilyGroup` em 79% dos
+passageiros. Na Random Forest, as colunas extras pioram levemente o resultado.
+
+### 14. Submissão no Kaggle
+
+| Modelo | Nota | Acertos (de 418) |
+|---|---|---|
+| Regressão Logística (Pipeline, `Title` + `FamilyGroup`) | 0,77033 | 322 |
+| Random Forest ajustada | 0,75358 | 315 |
+| Referência: regra "só mulheres sobrevivem" (nota pública) | 0,76555 | 320 |
+
+Os dois modelos discordam em 23 dos 418 passageiros, e a diferença de 7 acertos entre eles vem
+desses casos (a Regressão Logística acertou 15, a Random Forest 8). Previram, respectivamente,
+39,7% e 37,6% de sobreviventes (no treino, 38%).
+
+As notas ficaram abaixo da validação cruzada (~0,83). Contribuições possíveis, sem como separá-las:
+ruído de um teste pequeno (erro padrão de ~2 pontos com 418 passageiros), um teste um pouco mais
+difícil (a própria regra simples cai do treino para o teste) e otimismo de ter escolhido variáveis
+e hiperparâmetros olhando os mesmos dados.
+
 ## Principais aprendizados
 
-- **Baselines importam.** No split principal, a Regressão Logística superou a regra simples por apenas 4 passageiros (144 contra 140 acertos). Em 100 splits, o desempenho dela foi equivalente ao da regra (50 vitórias em 100).
+- **Baselines importam.** No split principal, a Regressão Logística superou a regra simples por apenas 4 passageiros (144 contra 140 acertos). No teste do Kaggle, a diferença foi de 2 passageiros para a logística e de -5 para a floresta.
 - **Um único split engana.** A mesma configuração variou de 72,1% a 84,4% conforme o sorteio. A validação cruzada (de preferência repetida) é a base de comparação.
 - **O modelo certo captura interações.** Com as mesmas variáveis, a Random Forest superou a regra em 83 de 100 splits, enquanto a Regressão Logística empatou.
 - **Overfitting é visível.** Uma árvore sem limite acerta 97,8% no treino e só 73,2% no teste, pior que a regra simples.
 - **Importância por impureza engana.** `Fare` e `Age` (contínuas, com muitos pontos de corte) aparecem inflacionadas; na permutation importance, `Sex` e `Pclass` dominam.
 - **A codificação importa.** Categorias codificadas como números (0/1/2) são lidas como escala por modelos lineares. Em one-hot, a mesma informação passou a ajudar a Regressão Logística (+2,5 p.p.).
-- **Feature engineering ajuda mais os modelos simples.** Família e título melhoraram a Regressão Logística (de 0,788 para 0,823) e não alteraram a Random Forest (0,824), que já captura padrões não lineares. Um modelo simples e interpretável chegou a empatar com a floresta.
-- **Redundância e tamanho do subgrupo limitam o ganho.** O título sozinho agregou pouco: em boa parte repete `Sex` e `Age`, e a parte nova (meninos "Master") envolve só 40 passageiros.
+- **Feature engineering ajuda mais os modelos simples.** Família e título melhoraram a Regressão Logística (de 0,788 para 0,823) e não alteraram a Random Forest, que já captura padrões não lineares.
+- **Redundância e tamanho do subgrupo limitam o ganho.** O título sozinho agregou pouco (repete `Sex` e `Age`), e `Deck` e `TicketGroup` repetem `Pclass` e `FamilyGroup`.
 - **Modelos interpretáveis explicam o ganho.** Os pesos da logística mostram que o valor da família está na penalidade das famílias grandes, e não em viajar acompanhado.
-- **Compare de forma pareada.** Comparar versões fold a fold, olhando a diferença média e em quantos folds a versão nova vence, é mais sensível do que comparar médias com seus desvios.
+- **Compare de forma pareada.** Comparar versões fold a fold, olhando vitórias, empates e derrotas, é mais sensível do que comparar médias com seus desvios.
+- **Ajuste de hiperparâmetros ajuda quem está longe do ponto ótimo.** A floresta ganhou 1,5 ponto; a logística, nada. A nota do `GridSearchCV` é otimista, e a validação aninhada dá o número honesto.
+- **A diferença entre dois modelos é decidida pelos casos em que eles discordam.** Com 23 discordâncias em 418, uma diferença de poucos acertos é ruído.
+- **Resultados negativos também são resultados.** Saber que uma variável não ajuda evita complexidade inútil.
 - **Desconfie de resultados idênticos.** Oito resultados iguais para modelos diferentes revelaram um erro no código, e não um achado.
 - **Acurácia não conta tudo.** O recall é maior para "Morreu" (0,86) do que para "Sobreviveu" (0,73): o modelo favorece a classe majoritária.
-- **Hiperparâmetros devem ser escolhidos por validação cruzada.** No GridSearchCV, `max_depth` de 3 a 8 ficou em empate técnico; na dúvida, prefere-se o modelo mais simples.
 
 ## Limitações conhecidas
 
-- A mediana da idade foi calculada com o dataset inteiro antes da divisão, o que gera um vazamento leve de dados (*data leakage*). A correção prevista é usar Pipelines do scikit-learn. O mesmo vale para a escolha dos títulos "raros", feita olhando o dataset inteiro.
+- A escolha dos títulos "raros", dos decks agrupados e dos hiperparâmetros foi feita olhando os dados de treino inteiros, o que deixa as estimativas de validação levemente otimistas.
 - O `max_depth=5` da seção 4 foi escolhido olhando um único split de teste; o GridSearchCV (seção 10) refaz essa escolha da forma correta.
 - Os folds de repetições diferentes reutilizam os mesmos passageiros, então a contagem de vitórias entre folds é um guia, e não um teste estatístico formal.
-- O melhor resultado do GridSearchCV é levemente otimista (sem validação cruzada aninhada).
-- A Random Forest foi usada com hiperparâmetros padrão (sem ajuste).
-- Os pesos da Regressão Logística (seção 9.4) vêm de um modelo regularizado, treinado em todos os dados e com variáveis em escalas diferentes; só os pesos das colunas one-hot são comparáveis entre si, e `Sex` e `Title` são parcialmente redundantes.
+- Os pesos da Regressão Logística (seção 11.2) vêm de um modelo regularizado treinado em todos os dados; `Sex` e `Title` são parcialmente redundantes, então vale a leitura do conjunto.
+- A nota do Kaggle se baseia em 418 passageiros, e diferenças de poucos acertos entre submissões não são conclusivas.
 
-## Roadmap
+## Próximos passos
 
-- [x] Análise exploratória
-- [x] Baselines e Regressão Logística
-- [x] Matriz de confusão, precisão e recall
-- [x] Análise da variação por `random_state`
-- [x] Validação cruzada (k-fold estratificado e repetido)
-- [x] Árvore de Decisão e Random Forest
-- [x] Permutation importance
-- [x] Feature engineering de família (`FamilySize`, `IsAlone`, `FamilyGroup`, one-hot)
-- [x] GridSearchCV
-- [x] Título extraído do nome e análise dos pesos da Regressão Logística
-- [ ] Pipeline do scikit-learn (evitar data leakage)
-- [ ] Padronizar variáveis (`StandardScaler`)
-- [ ] Ajuste de hiperparâmetros da Random Forest
-- [ ] Submissão no Kaggle
+- Organizar o notebook como relatório (seções, índice e conclusão)
+- Um segundo projeto, mais elaborado, com outro conjunto de dados
 
 ## Como executar
 
-1. Abra `titanic.ipynb` no [Google Colab](https://colab.research.google.com)
-2. Execute as células em ordem
+Requisitos: Python 3.10 ou superior (desenvolvido com 3.13).
+
+1. Clone o repositório e, de preferência, crie um ambiente virtual.
+2. Instale as bibliotecas:
+   ```
+   pip install pandas numpy matplotlib seaborn scikit-learn jupyter
+   ```
+3. Abra `titanic.ipynb` no VS Code (com a extensão Jupyter) ou no Jupyter Notebook e execute as células em ordem.
+4. O conjunto de treino é baixado automaticamente de uma URL pública (é preciso ter internet).
+5. Para a seção de submissão, baixe o `test.csv` em [kaggle.com/c/titanic/data](https://www.kaggle.com/c/titanic/data) e coloque-o na mesma pasta do notebook (o arquivo não é versionado).
 
 ## Tecnologias
 
